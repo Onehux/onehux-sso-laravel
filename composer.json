@@ -1,0 +1,29 @@
+{
+    "name": "onehux/sso",
+    "description": "PHP/Laravel SDK for OneHux Accounts SSO (Authorization Code + PKCE, real hosted login page, RP-initiated logout).",
+    "license": "MIT",
+    "type": "library",
+    "require": {
+        "php": "^8.1",
+        "guzzlehttp/guzzle": "^7.8"
+    },
+    "require-dev": {
+        "illuminate/support": "^10.0 || ^11.0"
+    },
+    "suggest": {
+        "illuminate/support": "Required to use the Laravel service provider (Onehux\\Sso\\OneHuxSSOServiceProvider) and its routes/session wiring."
+    },
+    "autoload": {
+        "psr-4": {
+            "Onehux\\Sso\\": "src/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Onehux\\Sso\\OneHuxSSOServiceProvider"
+            ]
+        }
+    },
+    "minimum-stability": "stable"
+}
