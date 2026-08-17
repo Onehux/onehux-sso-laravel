@@ -15,12 +15,15 @@ namespace Onehux\Sso;
 
 use GuzzleHttp\Client as HttpClient;
 use GuzzleHttp\Exception\GuzzleException;
+use Onehux\Sso\Exceptions\InvalidLogoutTokenException;
 use Onehux\Sso\Exceptions\InvalidStateException;
 use Onehux\Sso\Exceptions\TokenExchangeException;
 use Onehux\Sso\Exceptions\TokenExpiredException;
 
 final class OneHuxClient
 {
+    private const LOGOUT_EVENT_CLAIM_KEY = 'http://schemas.openid.net/event/backchannel-logout';
+
     private HttpClient $http;
 
     public function __construct(
@@ -171,5 +174,104 @@ final class OneHuxClient
         }
 
         return rtrim($this->loginBaseUrl, '/') . '/end-session?' . http_build_query($params);
+    }
+
+    private static function base64urlDecode(string $data): string
+    {
+        $padded = strtr($data, '-_', '+/');
+        $remainder = strlen($padded) % 4;
+        if ($remainder !== 0) {
+            $padded .= str_repeat('=', 4 - $remainder);
+        }
+        $decoded = base64_decode($padded, true);
+        return $decoded === false ? '' : $decoded;
+    }
+
+    /**
+     * Pull the `sid` claim out of an id_token WITHOUT verifying its signature -- this package
+     * cannot verify an id_token's signature at all (OneHux Accounts signs it with a server-only
+     * key never shared with any client -- the backend repo's oauth.services.build_jwt()
+     * docstring flags this as a deliberate Phase-1 gap), and doesn't need to for this purpose:
+     * the token was retrieved directly from a clientSecret-authenticated POST to
+     * /api/v1/oauth/token/ over TLS, not an untrusted redirect parameter, so trusting its
+     * contents here (indexing this local session for a later logout_token match) is standard
+     * OIDC RP practice. Returns null if the token doesn't decode or has no sid claim.
+     */
+    public function extractSidFromIdToken(string $idToken): ?string
+    {
+        $parts = explode('.', $idToken);
+        if (count($parts) !== 3) {
+            return null;
+        }
+        $payload = json_decode(self::base64urlDecode($parts[1]), true);
+        return is_array($payload) && isset($payload['sid']) && is_string($payload['sid'])
+            ? $payload['sid']
+            : null;
+    }
+
+    /**
+     * Real OIDC Back-Channel Logout validation (spec section 2.6), HS256-verified by hand via
+     * hash_hmac() -- this package's only other dependency is Guzzle, and a full JWT library
+     * isn't worth pulling in for one HMAC check. $signingSecret is the dedicated secret shown
+     * once when you registered your backchannel_logout_uri via
+     * PATCH /api/v1/applications/{id}/backchannel-logout/ -- deliberately NOT this client's own
+     * clientSecret (the backend cannot read that back to sign anything with it; see the backend
+     * repo's README.md ADR-074). Throws InvalidLogoutTokenException on any validation failure.
+     *
+     * @return array<string, mixed>
+     */
+    public function verifyLogoutToken(string $logoutToken, ?string $signingSecret): array
+    {
+        if ($signingSecret === null || $signingSecret === '') {
+            throw new InvalidLogoutTokenException(
+                'No backchannel logout signing secret configured '
+                . '(onehux-sso.backchannel_logout_signing_secret).'
+            );
+        }
+
+        $parts = explode('.', $logoutToken);
+        if (count($parts) !== 3) {
+            throw new InvalidLogoutTokenException('logout_token is not a well-formed JWT.');
+        }
+        [$headerB64, $payloadB64, $signatureB64] = $parts;
+
+        $header = json_decode(self::base64urlDecode($headerB64), true);
+        $payload = json_decode(self::base64urlDecode($payloadB64), true);
+        if (!is_array($header) || !is_array($payload)) {
+            throw new InvalidLogoutTokenException('logout_token header/payload is not valid JSON.');
+        }
+        if (($header['alg'] ?? null) !== 'HS256') {
+            $alg = is_string($header['alg'] ?? null) ? $header['alg'] : 'none';
+            throw new InvalidLogoutTokenException("Unsupported logout_token alg: {$alg}");
+        }
+
+        $expectedSignature = hash_hmac('sha256', "{$headerB64}.{$payloadB64}", $signingSecret, true);
+        $actualSignature = self::base64urlDecode($signatureB64);
+        if (!hash_equals($expectedSignature, $actualSignature)) {
+            throw new InvalidLogoutTokenException('logout_token signature verification failed.');
+        }
+
+        if (!isset($payload['exp']) || !is_int($payload['exp']) || $payload['exp'] < time()) {
+            throw new InvalidLogoutTokenException('logout_token has expired.');
+        }
+        if (($payload['aud'] ?? null) !== $this->clientId) {
+            throw new InvalidLogoutTokenException('logout_token aud does not match this client_id.');
+        }
+        if (array_key_exists('nonce', $payload)) {
+            throw new InvalidLogoutTokenException('logout_token MUST NOT contain a nonce claim.');
+        }
+        $events = $payload['events'] ?? null;
+        if (!is_array($events) || !array_key_exists(self::LOGOUT_EVENT_CLAIM_KEY, $events)) {
+            throw new InvalidLogoutTokenException(
+                'logout_token is missing the required events claim (' . self::LOGOUT_EVENT_CLAIM_KEY . ').'
+            );
+        }
+        if (empty($payload['sub']) && empty($payload['sid'])) {
+            throw new InvalidLogoutTokenException(
+                'logout_token must contain a sub claim, a sid claim, or both.'
+            );
+        }
+
+        return $payload;
     }
 }

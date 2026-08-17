@@ -49,5 +49,12 @@ class OneHuxSSOServiceProvider extends ServiceProvider
             Route::get('logout', [OneHuxSSOController::class, 'logout'])->name('onehux-sso.logout');
             Route::get('userinfo', [OneHuxSSOController::class, 'userinfo'])->name('onehux-sso.userinfo');
         });
+
+        // OIDC Back-Channel Logout: deliberately OUTSIDE the 'web' middleware group above --
+        // see OneHuxSSOController::backchannelLogout()'s own docstring for why (a server-to-
+        // server POST with no CSRF token to verify). No middleware at all is applied here; the
+        // logout_token's own HS256 signature is the real authenticity check.
+        Route::post("{$prefix}/backchannel-logout", [OneHuxSSOController::class, 'backchannelLogout'])
+            ->name('onehux-sso.backchannel-logout');
     }
 }

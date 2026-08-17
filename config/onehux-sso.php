@@ -15,8 +15,16 @@ return [
     'api_base_url' => env('ONEHUX_API_BASE_URL', 'https://api-accounts.onehux.com'),
     'scope' => env('ONEHUX_SCOPE', 'openid profile email'),
 
-    // Where the four routes below are mounted, and where a successful login/logout redirects.
+    // Where the routes below are mounted, and where a successful login/logout redirects.
     'route_prefix' => env('ONEHUX_ROUTE_PREFIX', 'auth'),
     'login_success_redirect' => env('ONEHUX_LOGIN_SUCCESS_REDIRECT', '/'),
     'session_access_token_key' => 'onehux_access_token',
+
+    // OIDC Back-Channel Logout (optional). The dedicated signing secret returned exactly once
+    // by PATCH /api/v1/applications/{id}/backchannel-logout/ when you register your
+    // backchannel_logout_uri -- deliberately NOT the same as client_secret above (the backend
+    // stores that only as a one-way hash and can never read it back to sign anything with it).
+    // Leave unset if you don't use back-channel logout; the route will respond 400 to every
+    // request rather than silently accepting an unverifiable one.
+    'backchannel_logout_signing_secret' => env('ONEHUX_BACKCHANNEL_LOGOUT_SIGNING_SECRET'),
 ];
