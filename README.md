@@ -86,6 +86,31 @@ $claims = $client->getUserinfo($tokens->accessToken);
 $logoutUrl = $client->buildLogoutUrl();
 ```
 
+## Public application launcher
+
+`GET /api/v1/organizations/{orgSlug}/public-applications/` is a real, public, unauthenticated
+platform endpoint — no `clientId`/`clientSecret` involved, usable for any Organization by its own
+slug, not just your own configured one. It returns only `name`/`logoUrl`/`homeUrl` for
+Applications that Organization has opted into public listing — a pure "what can I launch" list,
+never a way to start a sign-in flow.
+
+```php
+$apps = $client->getPublicApplications('onehux');
+// [PublicApplication { name: 'ODS', logoUrl: 'https://...', homeUrl: 'https://...' }]
+```
+
+Rendering is entirely up to you — this package ships the data method only, no Blade component.
+A plain, unstyled illustration (adapt this to your own design, don't copy it as-is):
+
+```blade
+@foreach ($apps as $app)
+    <a href="{{ $app->homeUrl }}">
+        <img src="{{ $app->logoUrl }}" alt="{{ $app->name }}">
+        {{ $app->name }}
+    </a>
+@endforeach
+```
+
 ## Logging out — what the user actually sees
 
 There are two different triggers, and — once you wire up back-channel logout (below) — they

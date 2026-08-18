@@ -17,6 +17,7 @@ use GuzzleHttp\Client as HttpClient;
 use GuzzleHttp\Exception\GuzzleException;
 use Onehux\Sso\Exceptions\InvalidLogoutTokenException;
 use Onehux\Sso\Exceptions\InvalidStateException;
+use Onehux\Sso\Exceptions\OrganizationNotFoundException;
 use Onehux\Sso\Exceptions\StepUpRequiredException;
 use Onehux\Sso\Exceptions\TokenExchangeException;
 use Onehux\Sso\Exceptions\TokenExpiredException;
@@ -192,6 +193,38 @@ final class OneHuxClient
         }
 
         return json_decode((string) $response->getBody(), true) ?? [];
+    }
+
+    /**
+     * GET {apiBaseUrl}/api/v1/organizations/{orgSlug}/public-applications/ -- the platform's
+     * public, unauthenticated application-launcher endpoint (README.md ADR-078). No
+     * clientId/clientSecret involved: this is a public, unauthenticated GET, usable for any
+     * Organization by its own slug, not just this client's own configured one. Throws
+     * OrganizationNotFoundException if orgSlug doesn't match a usable Organization.
+     *
+     * @return PublicApplication[]
+     */
+    public function getPublicApplications(string $orgSlug): array
+    {
+        try {
+            $response = $this->http->get(
+                rtrim($this->apiBaseUrl, '/') . '/api/v1/organizations/' . rawurlencode($orgSlug) . '/public-applications/',
+                ['http_errors' => false]
+            );
+        } catch (GuzzleException $exception) {
+            throw new OrganizationNotFoundException($exception->getMessage());
+        }
+
+        if ($response->getStatusCode() >= 300) {
+            $body = json_decode((string) $response->getBody(), true) ?? [];
+            throw new OrganizationNotFoundException($body['error_description'] ?? 'Organization not found.');
+        }
+
+        $items = json_decode((string) $response->getBody(), true) ?? [];
+        return array_map(
+            static fn (array $item) => new PublicApplication($item['name'], $item['logo_url'], $item['home_url']),
+            $items,
+        );
     }
 
     /**
