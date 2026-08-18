@@ -15,6 +15,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Session;
 use Onehux\Sso\Exceptions\InvalidLogoutTokenException;
 use Onehux\Sso\Exceptions\InvalidStateException;
+use Onehux\Sso\Exceptions\StepUpRequiredException;
 use Onehux\Sso\Exceptions\TokenExchangeException;
 use Onehux\Sso\Exceptions\TokenExpiredException;
 use Onehux\Sso\OneHuxClient;
@@ -42,32 +43,56 @@ class OneHuxSSOController extends Controller
     }
 
     /** GET {prefix}/callback -- verifies state, exchanges the code, stores the access token in
-     * the session, redirects to config('onehux-sso.login_success_redirect'). */
+     * the session, redirects to config('onehux-sso.login_success_redirect').
+     *
+     * On a step_up_required response specifically (README.md ADR-076, backend repo), this
+     * redirects the browser to complete step-up rather than failing -- the pending PKCE
+     * state/verifier is deliberately NOT cleared in that one case, since the browser will land
+     * back on this exact action shortly with a brand-new code for the same state. Every other
+     * outcome (success, InvalidStateException, any other TokenExchangeException) clears it
+     * exactly as before -- this is a narrow, additive branch, not a change to the general
+     * discard behavior. */
     public function callback(Request $request): RedirectResponse|Response
     {
         if ($request->has('error')) {
+            Session::forget(self::STATE_SESSION_KEY);
+            Session::forget(self::VERIFIER_SESSION_KEY);
             return response(
                 "Sign-in failed: {$request->query('error')} — {$request->query('error_description', '')}",
                 400,
             );
         }
 
-        $expectedState = Session::pull(self::STATE_SESSION_KEY);
-        $codeVerifier = Session::pull(self::VERIFIER_SESSION_KEY);
+        // Peeked, not pulled: the step_up_required branch below needs these to still be in the
+        // session if it fires. Every other branch forgets them explicitly before returning.
+        $expectedState = Session::get(self::STATE_SESSION_KEY);
+        $codeVerifier = Session::get(self::VERIFIER_SESSION_KEY);
+        $state = $request->query('state', '');
 
         try {
             $tokens = $this->client->exchangeCode(
                 $request->query('code', ''),
-                $request->query('state', ''),
+                $state,
                 $expectedState,
                 $codeVerifier,
             );
         } catch (InvalidStateException $exception) {
+            Session::forget(self::STATE_SESSION_KEY);
+            Session::forget(self::VERIFIER_SESSION_KEY);
             return response($exception->getMessage(), 400);
+        } catch (StepUpRequiredException) {
+            if ($codeVerifier === null || $state === '') {
+                return response('step_up_required with no pending PKCE state to resume.', 400);
+            }
+            return redirect()->away($this->client->buildStepUpRedirectUrl($codeVerifier, $state));
         } catch (TokenExchangeException $exception) {
+            Session::forget(self::STATE_SESSION_KEY);
+            Session::forget(self::VERIFIER_SESSION_KEY);
             return response("{$exception->error}: {$exception->errorDescription}", 400);
         }
 
+        Session::forget(self::STATE_SESSION_KEY);
+        Session::forget(self::VERIFIER_SESSION_KEY);
         Session::put(config('onehux-sso.session_access_token_key'), $tokens->accessToken);
 
         // OIDC Back-Channel Logout (optional): index this Laravel session by the OneHux

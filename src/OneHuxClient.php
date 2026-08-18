@@ -17,6 +17,7 @@ use GuzzleHttp\Client as HttpClient;
 use GuzzleHttp\Exception\GuzzleException;
 use Onehux\Sso\Exceptions\InvalidLogoutTokenException;
 use Onehux\Sso\Exceptions\InvalidStateException;
+use Onehux\Sso\Exceptions\StepUpRequiredException;
 use Onehux\Sso\Exceptions\TokenExchangeException;
 use Onehux\Sso\Exceptions\TokenExpiredException;
 
@@ -109,6 +110,13 @@ final class OneHuxClient
 
         $body = json_decode((string) $response->getBody(), true) ?? [];
         if ($response->getStatusCode() >= 300) {
+            if (($body['error'] ?? null) === 'step_up_required') {
+                // Deliberately distinct from TokenExchangeException: this is a recoverable,
+                // expected mid-login prompt (device/location trust gate), not a failed exchange
+                // -- the caller (the controller) redirects the browser to complete step-up
+                // rather than showing an error.
+                throw new StepUpRequiredException($body['error_description'] ?? '');
+            }
             throw new TokenExchangeException(
                 $body['error'] ?? 'unknown_error',
                 $body['error_description'] ?? '',
@@ -123,6 +131,35 @@ final class OneHuxClient
             expiresIn: $body['expires_in'],
             scope: $body['scope'],
         );
+    }
+
+    /**
+     * Build the redirect used when exchangeCode() throws StepUpRequiredException (README.md
+     * ADR-076, backend repo). Reuses this SAME pending authorization's clientId/redirectUri/
+     * scope/state, and re-derives codeChallenge from the already-stored codeVerifier (PKCE
+     * codeChallenge is a pure function of codeVerifier, so nothing extra needs to be persisted).
+     * Deep-links straight to the real hosted email-OTP step-up page -- the exact same URL the
+     * platform's own first-party dashboard redirects to for this identical error (backend repo:
+     * frontend/src/lib/server/step-up.ts) -- rather than the generic /login page, since the
+     * platform requires a step-up-caliber method specifically here. The caller MUST NOT discard
+     * the pending codeVerifier/state before calling this: the browser will land back on this
+     * same app's callback shortly with a brand-new code for this same state, and the controller
+     * needs the still-stored codeVerifier to exchange it.
+     */
+    public function buildStepUpRedirectUrl(string $codeVerifier, string $state): string
+    {
+        $codeChallenge = self::base64url(hash('sha256', $codeVerifier, true));
+        $query = http_build_query([
+            'client_id' => $this->clientId,
+            'redirect_uri' => $this->redirectUri,
+            'code_challenge' => $codeChallenge,
+            'code_challenge_method' => 'S256',
+            'scope' => $this->scope,
+            'state' => $state,
+            'reason' => 'step_up',
+        ]);
+
+        return rtrim($this->loginBaseUrl, '/') . '/login/email-otp?' . $query;
     }
 
     /**
