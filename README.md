@@ -26,6 +26,13 @@ because collapsing them into one host was a real, confirmed bug in the original 
 guides (see the backend repo's `README.md`, ADR-070) — the wrong host doesn't error loudly, it
 silently 404s.
 
+**If your Organization has a live custom domain** (Dashboard → Settings → Branding, see the
+backend repo's `README.md` ADR-027), set `ONEHUX_LOGIN_BASE_URL` to that domain instead — it's
+what your end users' browsers actually land on, so it should match whatever you've branded.
+Never override `ONEHUX_API_BASE_URL`: it has no per-Organization customization and never needs
+any — every call there is server-to-server via your `clientId`/`clientSecret`, never seen by an
+end user.
+
 ## Setup (Laravel)
 
 1. Register a real confidential-client `Application` in your OneHux Accounts Organization
