@@ -12,11 +12,10 @@ auto-discovered) that wires it to a real Laravel `Session` and registers four re
 ## Install
 
 ```bash
-composer config repositories.onehux-sso path /path/to/onehux_sso_client/php-laravel-package
-composer require onehux/sso:@dev
+composer require onehux/sso
 ```
 
-(Not yet published to Packagist — install via a local path repository until that's decided.)
+[packagist.org/packages/onehux/sso](https://packagist.org/packages/onehux/sso)
 
 ## Two hosts — don't mix them up
 
