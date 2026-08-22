@@ -9,7 +9,8 @@
     },
     "require-dev": {
         "illuminate/support": "^12.0 || ^13.0",
-        "phpunit/phpunit": "^11.0"
+        "phpunit/phpunit": "^11.0",
+        "orchestra/testbench": "^10.0 || ^11.2"
     },
     "suggest": {
         "illuminate/support": "Required to use the Laravel service provider (Onehux\\Sso\\OneHuxSSOServiceProvider) and its routes/session wiring."

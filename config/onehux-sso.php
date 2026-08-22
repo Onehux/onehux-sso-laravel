@@ -18,6 +18,14 @@ return [
     // Where the routes below are mounted, and where a successful login/logout redirects.
     'route_prefix' => env('ONEHUX_ROUTE_PREFIX', 'auth'),
     'login_success_redirect' => env('ONEHUX_LOGIN_SUCCESS_REDIRECT', '/'),
+
+    // Where the access token lives in Laravel's Session. NOTE: this key's presence in the
+    // session is governed by your app's own SESSION_LIFETIME (Laravel default: 120 minutes) --
+    // that is NOT the same thing as the token itself still being valid (15-minute lifetime, no
+    // refresh token). Never treat Session::has() on this key as proof of a still-valid token;
+    // the real check is catching TokenExpiredException from getUserinfo() / handling the 401
+    // from {prefix}/userinfo. See README.md's "Laravel's SESSION_LIFETIME is a separate thing
+    // from the token's 15 minutes" section.
     'session_access_token_key' => 'onehux_access_token',
 
     // OIDC Back-Channel Logout (optional). The dedicated signing secret returned exactly once

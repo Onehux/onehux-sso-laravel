@@ -179,6 +179,32 @@ the token has expired or been revoked — catch it and send the user back throug
 `$client->startAuthorization()` for a fresh login. There is no silent-refresh path to fall back
 to; this package makes that explicit rather than hiding it behind a generic error.
 
+`{prefix}/userinfo` (`OneHuxSSOController::userinfo()`) already does exactly this: it catches
+`TokenExpiredException` itself and returns a clean `401` — never a raw framework exception page,
+never a silently-succeeding request — so your own frontend's fetch to `{prefix}/userinfo` is the
+real, live check of whether the access token is still valid. **This package has no middleware of
+its own** and doesn't protect any of your app's own routes; `{prefix}/userinfo` is a ready-to-call
+JSON endpoint, not a gate Laravel enforces for you.
+
+### Laravel's `SESSION_LIFETIME` is a separate thing from the token's 15 minutes — don't conflate them
+
+Laravel's own session cookie (`SESSION_LIFETIME`, default `120` minutes) governs how long
+`Session::get('onehux_access_token')` keeps *returning a value* — it says nothing about whether
+that value is still a *valid* token. The access token embedded in it is independently good for
+only 15 minutes no matter what `SESSION_LIFETIME` is set to. Two consequences:
+
+- **Never treat `Session::has('onehux_access_token')` alone as proof of a signed-in user.**
+  With the stock `SESSION_LIFETIME=120`, that key can be present for up to ~105 minutes after the
+  underlying token has actually expired. The only real check is calling `getUserinfo()` (or
+  hitting `{prefix}/userinfo`) and handling the `401`/`TokenExpiredException` it throws when
+  stale — that's the actual safety net, not the cookie's lifetime.
+- A much longer `SESSION_LIFETIME` than the token's 15 minutes isn't a security hole by itself
+  (no protected data is served off a stale session — the next real `getUserinfo()` call 401s
+  regardless), but it does widen the window in which your UI can display a "signed in" state that
+  a real API call would immediately reject. `example/.env.example` ships `SESSION_LIFETIME=30` —
+  close enough to the token's own 15 minutes to keep that window small, while leaving slack for
+  clock skew/latency — rather than Laravel's much larger stock default of `120`.
+
 ## Example project
 
 See `example/` for a complete, runnable Laravel application using this package end-to-end —
